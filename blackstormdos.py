@@ -5,7 +5,6 @@ import binascii
 import os
 import sys
 import base64
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class AdvancedHashCracker:
@@ -26,23 +25,11 @@ class AdvancedHashCracker:
             'Adler32': lambda x: format(zlib.adler32(x.encode()) & 0xFFFFFFFF, '08x'),
             'CRC32': lambda x: format(binascii.crc32(x.encode()) & 0xFFFFFFFF, '08x'),
             'NTLM': lambda x: hashlib.new('md4', x.encode('utf-16le')).hexdigest(),
-            'BASE64': lambda x: base64.b64encode(x.encode()).decode(),
-            'BASE32': lambda x: base64.b32encode(x.encode()).decode(),
-            'BASE16': lambda x: base64.b16encode(x.encode()).decode(),
-            'BASE85': lambda x: base64.b85encode(x.encode()).decode(),
-            'ASCII85': lambda x: base64.a85encode(x.encode()).decode()
-        }
-        
-        self.encoding_algorithms = {
-            'BASE64': lambda x: base64.b64encode(x.encode()).decode(),
-            'BASE32': lambda x: base64.b32encode(x.encode()).decode(),
-            'BASE16': lambda x: base64.b16encode(x.encode()).decode(),
-            'BASE85': lambda x: base64.b85encode(x.encode()).decode(),
-            'ASCII85': lambda x: base64.a85encode(x.encode()).decode(),
-            'URL_BASE64': lambda x: base64.urlsafe_b64encode(x.encode()).decode(),
-            'BASE64_DECODE': lambda x: base64.b64decode(x).decode(),
-            'BASE32_DECODE': lambda x: base64.b32decode(x).decode(),
-            'BASE16_DECODE': lambda x: base64.b16decode(x).decode()
+            'Base64': lambda x: base64.b64encode(x.encode()).decode(),
+            'Base64_URL': lambda x: base64.urlsafe_b64encode(x.encode()).decode(),
+            'Base32': lambda x: base64.b32encode(x.encode()).decode(),
+            'Base16': lambda x: base64.b16encode(x.encode()).decode(),
+            'Base85': lambda x: base64.b85encode(x.encode()).decode()
         }
         
         self.model = None
@@ -58,17 +45,7 @@ class AdvancedHashCracker:
             pass
 
     def detect_hash_type(self, hash_str):
-        hash_str_clean = hash_str.strip()
-        hash_length = len(hash_str_clean)
-        
-        if self.is_base64(hash_str_clean):
-            return ['BASE64', 'URL_BASE64', 'BASE64_DECODE']
-        elif self.is_base32(hash_str_clean):
-            return ['BASE32', 'BASE32_DECODE']
-        elif self.is_base16(hash_str_clean):
-            return ['BASE16', 'BASE16_DECODE']
-        elif self.is_base85(hash_str_clean):
-            return ['BASE85', 'ASCII85']
+        hash_length = len(hash_str)
         
         hash_patterns = {
             32: ['MD5', 'NTLM'],
@@ -80,37 +57,81 @@ class AdvancedHashCracker:
             8: ['Adler32', 'CRC32']
         }
         
-        return hash_patterns.get(hash_length, ['Unknown'])
+        possible_types = hash_patterns.get(hash_length, ['Unknown'])
+        
+        # Base64 tespiti için ek kontrol
+        if self.is_base64(hash_str):
+            if hash_str.endswith('=') or hash_str.endswith('=='):
+                possible_types.append('Base64')
+            elif '/' in hash_str or '+' in hash_str:
+                possible_types.append('Base64')
+            else:
+                possible_types.append('Base64_URL')
+                
+        # Base32 tespiti
+        if self.is_base32(hash_str):
+            possible_types.append('Base32')
+            
+        # Base16 tespiti
+        if self.is_base16(hash_str):
+            possible_types.append('Base16')
+            
+        # Base85 tespiti
+        if self.is_base85(hash_str):
+            possible_types.append('Base85')
+        
+        return possible_types
 
     def is_base64(self, s):
         try:
-            if len(s) % 4 == 0:
-                base64.b64decode(s, validate=True)
+            # Base64 karakter seti kontrolü
+            base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+            if all(c in base64_chars for c in s):
+                # Uzunluk kontrolü (4'ün katı olmalı)
+                if len(s) % 4 == 0:
+                    # Decode denemesi
+                    base64.b64decode(s)
+                    return True
+        except:
+            pass
+        
+        # URL-safe Base64 kontrolü
+        try:
+            base64_chars_url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            if all(c in base64_chars_url for c in s):
+                base64.urlsafe_b64decode(s)
                 return True
         except:
             pass
+            
         return False
 
     def is_base32(self, s):
         try:
-            base64.b32decode(s, validate=True)
-            return True
+            base32_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567="
+            if all(c in base32_chars for c in s):
+                base64.b32decode(s)
+                return True
         except:
             pass
         return False
 
     def is_base16(self, s):
         try:
-            base64.b16decode(s, validate=True)
-            return True
+            base16_chars = "0123456789ABCDEF"
+            if all(c in base16_chars for c in s.upper()):
+                base64.b16decode(s.upper())
+                return True
         except:
             pass
         return False
 
     def is_base85(self, s):
         try:
-            base64.b85decode(s, validate=True)
-            return True
+            base85_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~"
+            if all(c in base85_chars for c in s):
+                base64.b85decode(s)
+                return True
         except:
             pass
         return False
@@ -122,6 +143,7 @@ class AdvancedHashCracker:
                 return self.model.predict(vec)[0]
             except:
                 pass
+        
         detected = self.detect_hash_type(hash_str)
         return detected[0] if detected else 'Unknown'
 
@@ -129,48 +151,33 @@ class AdvancedHashCracker:
         if not hash_type:
             hash_type = self.ai_predict_hash_type(hash_input)
         
-        print(f"Trying algorithm: {hash_type}")
+        print(f"Trying hash type: {hash_type}")
         
-        if hash_type in self.hash_algorithms:
-            hash_func = self.hash_algorithms[hash_type]
-        elif hash_type in self.encoding_algorithms:
-            hash_func = self.encoding_algorithms[hash_type]
-        else:
-            print(f"Unsupported algorithm: {hash_type}")
+        if hash_type not in self.hash_algorithms:
+            print(f"Unsupported hash type: {hash_type}")
             return None
 
+        hash_func = self.hash_algorithms[hash_type]
         found_password = None
-        line_count = 0
 
         try:
             with open(wordlist_path, 'r', encoding='utf-8', errors='ignore') as file:
-                for word in file:
+                for line_num, word in enumerate(file, 1):
                     word = word.strip()
                     if not word:
                         continue
                     
-                    line_count += 1
                     try:
-                        if hash_type.endswith('_DECODE'):
-                            try:
-                                decoded = hash_func(word)
-                                if decoded == hash_input:
-                                    found_password = word
-                                    print(f"Encoding match found: {word}")
-                                    break
-                            except:
-                                continue
-                        else:
-                            hashed = hash_func(word)
-                            if hashed == hash_input:
-                                found_password = word
-                                print(f"Hash match found: {word}")
-                                break
+                        hashed = hash_func(word)
+                        if hashed == hash_input:
+                            found_password = word
+                            print(f"Match found: {word}")
+                            break
                     except Exception as e:
                         continue
                     
-                    if line_count % 10000 == 0:
-                        print(f"Processed {line_count} passwords...")
+                    if line_num % 10000 == 0:
+                        print(f"Processed {line_num} passwords...")
                         
         except FileNotFoundError:
             print("Wordlist file not found")
@@ -184,9 +191,10 @@ class AdvancedHashCracker:
     def crack_with_multiple_types(self, hash_input, wordlist_path):
         possible_types = self.detect_hash_type(hash_input)
         
-        print(f"Detected possible algorithms: {', '.join(possible_types)}")
+        print(f"Detected possible hash types: {', '.join(possible_types)}")
         
         for hash_type in possible_types:
+            print(f"Trying {hash_type}...")
             result = self.crack_single_hash(hash_input, wordlist_path, hash_type)
             if result:
                 return result, hash_type
@@ -196,14 +204,11 @@ class AdvancedHashCracker:
         found_password = None
         hash_type = self.ai_predict_hash_type(hash_input)
         
-        if hash_type not in self.hash_algorithms and hash_type not in self.encoding_algorithms:
+        if hash_type not in self.hash_algorithms:
             return None
 
-        if hash_type in self.hash_algorithms:
-            hash_func = self.hash_algorithms[hash_type]
-        else:
-            hash_func = self.encoding_algorithms[hash_type]
-
+        hash_func = self.hash_algorithms[hash_type]
+        
         try:
             with open(wordlist_path, 'r', encoding='utf-8', errors='ignore') as file:
                 passwords = [line.strip() for line in file if line.strip()]
@@ -212,135 +217,91 @@ class AdvancedHashCracker:
 
         def check_password(password):
             try:
-                if hash_type.endswith('_DECODE'):
-                    try:
-                        decoded = hash_func(password)
-                        return password if decoded == hash_input else None
-                    except:
-                        return None
-                else:
-                    hashed = hash_func(password)
-                    return password if hashed == hash_input else None
+                hashed = hash_func(password)
+                return password if hashed == hash_input else None
             except:
                 return None
 
-        print(f"Starting multi-threaded cracking with {num_threads} threads...")
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = {executor.submit(check_password, pwd): pwd for pwd in passwords}
             
-            completed = 0
-            total = len(passwords)
-            
             for future in as_completed(futures):
-                completed += 1
                 result = future.result()
                 if result:
                     found_password = result
                     executor.shutdown(wait=False)
                     break
-                    
-                if completed % 10000 == 0:
-                    print(f"Progress: {completed}/{total} ({completed/total*100:.1f}%)")
 
         return found_password
 
-    def encode_text(self, text, encoding_type):
-        if encoding_type in self.encoding_algorithms:
-            try:
-                return self.encoding_algorithms[encoding_type](text)
-            except Exception as e:
-                return f"Encoding error: {e}"
-        return "Unsupported encoding type"
-
-    def decode_text(self, encoded_text, encoding_type):
-        decode_map = {
-            'BASE64': lambda x: base64.b64decode(x).decode(),
-            'BASE32': lambda x: base64.b32decode(x).decode(),
-            'BASE16': lambda x: base64.b16decode(x).decode(),
-            'BASE85': lambda x: base64.b85decode(x).decode(),
-            'ASCII85': lambda x: base64.a85decode(x).decode(),
-            'URL_BASE64': lambda x: base64.urlsafe_b64decode(x).decode()
-        }
-        
-        if encoding_type in decode_map:
-            try:
-                return decode_map[encoding_type](encoded_text)
-            except Exception as e:
-                return f"Decoding error: {e}"
-        return "Unsupported decoding type"
+    def direct_base64_decode(self, base64_string):
+        """Base64 string'ini doğrudan decode etmeye çalışır"""
+        try:
+            # Standart Base64
+            decoded = base64.b64decode(base64_string).decode('utf-8')
+            return decoded
+        except:
+            pass
+            
+        try:
+            # URL-safe Base64
+            decoded = base64.urlsafe_b64decode(base64_string).decode('utf-8')
+            return decoded
+        except:
+            pass
+            
+        return None
 
 def main():
-    print("🚀 Advanced Hash & Encoding Cracker")
-    print("=" * 60)
+    print("Advanced Hash Cracker with Base64 Support")
+    print("=" * 50)
     
     cracker = AdvancedHashCracker()
     
-    print("\n1. Crack Hash/Encoding")
-    print("2. Encode Text")
-    print("3. Decode Text")
+    hash_input = input("Enter hash: ").strip()
+    if not hash_input:
+        print("No hash provided")
+        return
     
-    choice = input("\nSelect option (1-3): ").strip()
+    # Base64 doğrudan decode denemesi
+    direct_decode = cracker.direct_base64_decode(hash_input)
+    if direct_decode:
+        print(f"\nDirect Base64 decode successful: {direct_decode}")
+        proceed = input("Continue with wordlist cracking? (y/n): ").strip().lower()
+        if proceed != 'y':
+            return
     
-    if choice == "1":
-        hash_input = input("Enter hash/encoded text: ").strip()
-        if not hash_input:
-            print("No input provided")
-            return
-        
-        wordlist_path = input("Enter wordlist path: ").strip()
-        if not wordlist_path or not os.path.exists(wordlist_path):
-            print("Invalid wordlist path")
-            return
-        
-        print("\n🔍 Detection Results:")
-        print(f"Input length: {len(hash_input)}")
-        detected_types = cracker.detect_hash_type(hash_input)
-        print(f"Possible algorithms: {', '.join(detected_types)}")
-        
-        if cracker.model:
-            ai_prediction = cracker.ai_predict_hash_type(hash_input)
-            print(f"AI prediction: {ai_prediction}")
-        
-        use_threads = input("\nUse multi-threading? (y/n): ").strip().lower() == 'y'
-        
-        print("\n🎯 Starting crack process...")
-        
-        if use_threads:
-            result = cracker.crack_with_threads(hash_input, wordlist_path)
-            hash_type = cracker.ai_predict_hash_type(hash_input)
-        else:
-            result, hash_type = cracker.crack_with_multiple_types(hash_input, wordlist_path)
-        
-        if result:
-            print(f"\n✅ SUCCESS! Password found: {result}")
-            print(f"Algorithm: {hash_type}")
-        else:
-            print("\n❌ Password not found in wordlist")
-            
-    elif choice == "2":
-        text = input("Enter text to encode: ").strip()
-        print("\nAvailable encoding types:")
-        for algo in cracker.encoding_algorithms.keys():
-            if not algo.endswith('_DECODE'):
-                print(f"  - {algo}")
-        
-        encoding_type = input("Select encoding type: ").strip().upper()
-        result = cracker.encode_text(text, encoding_type)
-        print(f"\nEncoded result: {result}")
-        
-    elif choice == "3":
-        encoded_text = input("Enter encoded text to decode: ").strip()
-        print("\nAvailable decoding types:")
-        decode_types = ['BASE64', 'BASE32', 'BASE16', 'BASE85', 'ASCII85', 'URL_BASE64']
-        for algo in decode_types:
-            print(f"  - {algo}")
-        
-        decoding_type = input("Select decoding type: ").strip().upper()
-        result = cracker.decode_text(encoded_text, decoding_type)
-        print(f"\nDecoded result: {result}")
-        
+    wordlist_path = input("Enter wordlist path: ").strip()
+    if not wordlist_path or not os.path.exists(wordlist_path):
+        print("Invalid wordlist path")
+        return
+    
+    print("\nDetection Results:")
+    print(f"Hash length: {len(hash_input)}")
+    detected_types = cracker.detect_hash_type(hash_input)
+    print(f"Possible types: {', '.join(detected_types)}")
+    
+    if cracker.model:
+        ai_prediction = cracker.ai_predict_hash_type(hash_input)
+        print(f"AI prediction: {ai_prediction}")
+    
+    print("\nStarting crack process...")
+    
+    use_threads = input("Use multi-threading? (y/n): ").strip().lower() == 'y'
+    
+    if use_threads:
+        num_threads = input("Number of threads (default 4): ").strip()
+        num_threads = int(num_threads) if num_threads.isdigit() else 4
+        result = cracker.crack_with_threads(hash_input, wordlist_path, num_threads)
+        hash_type = cracker.ai_predict_hash_type(hash_input)
     else:
-        print("Invalid option")
+        result, hash_type = cracker.crack_with_multiple_types(hash_input, wordlist_path)
+    
+    if result:
+        print(f"\nSuccess! Password found: {result}")
+        print(f"Hash type: {hash_type}")
+    else:
+        print("\nPassword not found in wordlist")
 
 if __name__ == "__main__":
     main()
